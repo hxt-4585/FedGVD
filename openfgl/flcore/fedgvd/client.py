@@ -6,20 +6,17 @@ from openfgl.flcore.base import BaseClient
 from openfgl.flcore.fedgvd.SimGC_transductive import data_gc, root, args
 from openfgl.flcore.fedgvd.fedgvd_config import config
 
-class Feddgc1Client(BaseClient):
+class FedGVDClient(BaseClient):
     """
-    FedProtoClient is a client implementation for the Federated Prototype Learning (FedProto) framework.
-    This client handles the local training of models, computes class-specific prototypes, and interacts
-    with the server to contribute to the global model updates.
-
-    Attributes:
-        local_prototype (dict): A dictionary storing the local prototypes for each class after training.
+    FedGVDClient handles local graph condensation and model training for FedGVD.
+    It generates synthetic graph data and uses predictions supplied by the server
+    to guide subsequent local training.
     """
 
 
     def __init__(self, args, client_id, data, data_dir, message_pool, device):
         """
-        Initializes the FedProtoClient.
+        Initializes the FedGVDClient.
 
         Attributes:
             args (Namespace): Arguments containing model and training configurations.
@@ -29,7 +26,7 @@ class Feddgc1Client(BaseClient):
             message_pool (object): Pool for managing messages between client and server.
             device (torch.device): Device to run the computations on.
         """
-        super(Feddgc1Client, self).__init__(args, client_id, data, data_dir, message_pool, device)
+        super(FedGVDClient, self).__init__(args, client_id, data, data_dir, message_pool, device)
         self.message_pool["feat_syn"] = {}
         self.message_pool["edge_index_syn"] = {}
         self.message_pool["label_syn"] = {}
@@ -43,9 +40,8 @@ class Feddgc1Client(BaseClient):
 
     def execute(self):
         """
-        Executes the local training process. This method sets a custom loss function that incorporates
-        the prototype-based regularization term, performs local training, and then updates the local
-        prototypes for each class.
+        Generates synthetic graph data in the first round and trains the local model
+        in subsequent rounds using the configured loss function.
         """
         if self.message_pool["round"] == 0:
             if os.path.exists( f'{root}/saved_ours/feat_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{self.client_id}.pt') and os.path.exists(f'{root}/saved_ours/adj_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{self.client_id}.pt') and os.path.exists(f'{root}/saved_ours/label_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{self.client_id}.pt'):
@@ -129,8 +125,7 @@ class Feddgc1Client(BaseClient):
 
     def update_syn_logits(self):
         """
-        Updates the local prototypes for each class after local training. The prototypes are calculated
-        as the mean of the embeddings of the samples belonging to each class.
+        Stores synthetic-node embeddings in the shared message pool after local training.
         """
 
         with torch.no_grad():

@@ -14,15 +14,15 @@ import os
 import gc
 import math
 
-from openfgl.flcore.feddgc.utils import *
+from openfgl.flcore.fedgvd.utils import *
 from torch_sparse import SparseTensor
 from copy import deepcopy
 from torch_geometric.utils import coalesce
 
-from openfgl.flcore.feddgc.models.basicgnn import GCN as GCN_PYG, GIN as GIN_PYG, SGC as SGC_PYG, GraphSAGE as SAGE_PYG, JKNet as JKNet_PYG
-from openfgl.flcore.feddgc.models.mlp import MLP as MLP_PYG
-from openfgl.flcore.feddgc.models.sgc_multi import SGC_Multi as SGC_Multi_PYG
-from openfgl.flcore.feddgc.models.parametrized_adj import PGE
+from openfgl.flcore.fedgvd.models.basicgnn import GCN as GCN_PYG, GIN as GIN_PYG, SGC as SGC_PYG, GraphSAGE as SAGE_PYG, JKNet as JKNet_PYG
+from openfgl.flcore.fedgvd.models.mlp import MLP as MLP_PYG
+from openfgl.flcore.fedgvd.models.sgc_multi import SGC_Multi as SGC_Multi_PYG
+from openfgl.flcore.fedgvd.models.parametrized_adj import PGE
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--gpu_id', type=int, default=0, help='gpu id')

@@ -1,14 +1,14 @@
 import torch
 from openfgl.flcore.base import BaseServer
-from ..feddgc.contrastive import get_coordinated_data
+from ..fedgvd.contrastive import get_coordinated_data
 from torch_geometric.data import Data
 from torch import nn
 
 
-class Feddgc1Server(BaseServer):
+class FedGVDServer(BaseServer):
 
     def __init__(self, args, global_data, data_dir, message_pool, device):
-        super(Feddgc1Server, self).__init__(args, global_data, data_dir, message_pool, device)
+        super(FedGVDServer, self).__init__(args, global_data, data_dir, message_pool, device)
 
 
     def execute(self):

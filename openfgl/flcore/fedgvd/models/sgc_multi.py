@@ -7,7 +7,7 @@ from torch_geometric.nn.conv import MessagePassing
 from torch_geometric.nn.conv.gcn_conv import gcn_norm
 from torch_geometric.nn.dense.linear import Linear
 from torch_geometric.typing import Adj, OptTensor
-from openfgl.flcore.fedproto.models.mlp import MLP
+from openfgl.flcore.fedgvd.models.mlp import MLP
 from torch_geometric.loader import NeighborSampler
 from tqdm import tqdm
 
