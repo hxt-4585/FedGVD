@@ -71,8 +71,15 @@ class FedGVDServer(BaseServer):
             loss.backward()
             self.task.optim.step()
 
+    # def _calculate_loss(self, data, logits):
+    #     return nn.CrossEntropyLoss()(logits[:-30], data.y)
+
     def _calculate_loss(self, data, logits):
-        return nn.CrossEntropyLoss()(logits[:-30], data.y)
+        num_labeled_nodes = data.y.size(0)
+        return nn.CrossEntropyLoss()(
+            logits[:num_labeled_nodes],
+            data.y
+        )
 
     def _calculate_client_logits(self, global_data):
         self.task.model.eval()

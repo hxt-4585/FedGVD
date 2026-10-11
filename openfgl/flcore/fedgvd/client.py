@@ -46,13 +46,13 @@ class FedGVDClient(BaseClient):
         if self.message_pool["round"] == 0:
             if os.path.exists( f'{root}/saved_ours/feat_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{self.client_id}.pt') and os.path.exists(f'{root}/saved_ours/adj_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{self.client_id}.pt') and os.path.exists(f'{root}/saved_ours/label_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{self.client_id}.pt'):
                 feat_syn = torch.load(
-                    f'{root}/saved_ours/feat_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{self.client_id}.pt').detach().to(self.device)
+                    f'{root}/saved_ours/feat_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{self.client_id}.pt', map_location=self.device).detach().to(self.device)
                 adj_syn = torch.load(
-                    f'{root}/saved_ours/adj_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{self.client_id}.pt').detach().to(self.device)
+                    f'{root}/saved_ours/adj_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{self.client_id}.pt', map_location=self.device).detach().to(self.device)
                 labels_syn = torch.load(
-                    f'{root}/saved_ours/label_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{self.client_id}.pt').detach().to(self.device)
+                    f'{root}/saved_ours/label_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{self.client_id}.pt', map_location=self.device).detach().to(self.device)
             else:
-                feat_syn,adj_syn,labels_syn = data_gc(self.task.processed_data,self.client_id)
+                feat_syn,adj_syn,labels_syn = data_gc(self.task.processed_data,self.client_id,device=self.device)
 
             random_matrix  = torch.rand(adj_syn.shape).to(self.device)  
             sampled_edges = (random_matrix <= adj_syn).float()
@@ -119,7 +119,9 @@ class FedGVDClient(BaseClient):
                 input = logits[self.local_data_len:]
                 target = self.message_pool[f"client_{self.client_id}"]["syn_logits"].to(self.device)
                 loss_kd += nn.MSELoss()(input, target)
-                return self.task.default_loss_fn(logits[:self.local_data_len][mask[:self.local_data_len]], label[:self.local_data_len][mask[:self.local_data_len]]) + config['gama']*self.task.default_loss_fn(logits[self.local_data_len:][mask[self.local_data_len:]], label[self.local_data_len:][mask[self.local_data_len:]]) + config['lambda'] * loss_kd
+                return (self.task.default_loss_fn(logits[:self.local_data_len][mask[:self.local_data_len]], label[:self.local_data_len][mask[:self.local_data_len]])
+                        + config['gama']*self.task.default_loss_fn(logits[self.local_data_len:][mask[self.local_data_len:]], label[self.local_data_len:][mask[self.local_data_len:]])
+                        + config['lambda'] * loss_kd)
         return custom_loss_fn
 
 

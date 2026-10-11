@@ -8,7 +8,7 @@ args = config.args
 args.root = "dataset"
 
 
-args.dataset = ["Computers"]
+args.dataset = ["Cora"]
 args.simulation_mode = "subgraph_fl_louvain"
 args.num_clients = 10
 
@@ -18,8 +18,8 @@ args.num_clients = 10
 #     args.model = ["gcn"]
 # else:
 args.fl_algorithm = "fedgvd"
-# args.model = ["gcn", "gat", "sgc", "mlp", "graphsage"] # choose multiple gnn models for model heterogeneity setting.
-args.model = ["gcn","gat", "sgc","graphsage"] # choose multiple gnn models for model heterogeneity setting.
+args.model = ["gcn", "gat", "sgc", "mlp", "graphsage"] # choose multiple gnn models for model heterogeneity setting.
+# args.model = ["gcn","gat", "sgc","graphsage"] # choose multiple gnn models for model heterogeneity setting.
 # args.model = ["gcn","gat"] # choose multiple gnn models for model heterogeneity setting.
 # args.model = ["gcn"] # choose multiple gnn models for model heterogeneity setting.
 

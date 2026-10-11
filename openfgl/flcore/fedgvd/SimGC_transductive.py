@@ -27,7 +27,7 @@ from openfgl.flcore.fedgvd.models.parametrized_adj import PGE
 parser = argparse.ArgumentParser()
 parser.add_argument('--gpu_id', type=int, default=0, help='gpu id')
 parser.add_argument('--parallel_gpu_ids', type=list, default=[0,1,2], help='gpu id')
-parser.add_argument('--dataset', type=str, default='computers30')
+parser.add_argument('--dataset', type=str, default='cora')
 parser.add_argument('--seed', type=int, default=23, help='Random seed.')
 #gnn
 parser.add_argument('--nlayers', type=int, default=2)
@@ -43,7 +43,7 @@ parser.add_argument('--validation_model', type=str, default='GCN')
 parser.add_argument('--model', type=str, default='GCN')
 #ratio
 parser.add_argument('--keep_ratio', type=float, default=1.0)
-parser.add_argument('--reduction_rate', type=float, default=1.0)
+parser.add_argument('--reduction_rate', type=float, default=0.2)
 #condensation
 parser.add_argument('--lr_adj', type=float, default=0.01)#arxiv/products:0.01+0.05 cora/citeseer:0.001+0.005
 parser.add_argument('--lr_feat', type=float, default=0.05)
@@ -70,8 +70,6 @@ print(args)
 # os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2,3'
 # torch.cuda.set_device(args.gpu_id)
 # print("Let's use", torch.cuda.device_count(), "GPUs!")
-device = 'cuda:7'  # 指定使用 GPU 9
-torch.cuda.set_device(7)
 
 # random seed setting
 random.seed(args.seed)
@@ -79,6 +77,12 @@ np.random.seed(args.seed)
 torch.manual_seed(args.seed)
 torch.cuda.manual_seed(args.seed)
 root = os.path.abspath(os.path.dirname(__file__))
+for output_dir in (
+    os.path.join(root, "saved_model", "teacher"),
+    os.path.join(root, "saved_model", "student"),
+    os.path.join(root, "saved_ours"),
+):
+    os.makedirs(output_dir, exist_ok=True)
 
 def generate_labels_syn(labels_train):
     from collections import Counter
@@ -98,7 +102,7 @@ def generate_labels_syn(labels_train):
 
 
 # teacher model
-def train_teacher(feat,adj,idx_train,labels_train,teacher_model,idx_val,labels_val,root,idx_test,labels_test,client_id):
+def train_teacher(feat,adj,idx_train,labels_train,teacher_model,idx_val,labels_val,root,idx_test,labels_test,client_id,device):
     optimizer_origin=torch.optim.Adam(teacher_model.parameters(), lr=args.lr_teacher_model)
 
     best_val=0
@@ -134,7 +138,7 @@ def train_teacher(feat,adj,idx_train,labels_train,teacher_model,idx_val,labels_v
     return
 
 
-def train_syn(d,nclass,feat_syn,pge,feat_train,feat,adj,idx_train,num_class_dict,labels_train,teacher_model,labels_syn,n,idx_val,labels_val,root,idx_test,labels_test,client_id):
+def train_syn(d,nclass,feat_syn,pge,feat_train,feat,adj,idx_train,num_class_dict,labels_train,teacher_model,labels_syn,n,idx_val,labels_val,root,idx_test,labels_test,client_id,device):
     # elif args.validation_model=='SGC':
     if args.validation_model=='GCN':
         if args.dataset in ["cora","citeseer"]:
@@ -273,7 +277,8 @@ def train_syn(d,nclass,feat_syn,pge,feat_train,feat,adj,idx_train,num_class_dict
                             torch.save(validation_model.state_dict(), f'{root}/saved_model/student/{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_3_256_0.5_relu_1__{client_id}.pt')
             print('Epoch {}'.format(i), "Best test acc:", best_test)
 
-def data_gc(processed_data,client_id):
+def data_gc(processed_data,client_id,device):
+    device = torch.device(device)
 
     data = get_dataset(processed_data, True)
     adj, feat = utils.to_tensor(data.adj, data.features, device='cpu')
@@ -314,8 +319,8 @@ def data_gc(processed_data,client_id):
             teacher_model = SGC_Multi_PYG(nfeat=d, nhid=args.hidden, nclass=nclass, dropout=args.dropout, K=args.nlayers, nlayers=3, norm='BatchNorm').to(device)
     if not os.path.exists(root+'/saved_model/teacher/'+args.dataset+'_'+args.teacher_model+'_'+str(args.seed)+'.pt'):
         print("Traning Teacher!")
-        train_teacher(feat,adj,idx_train,labels_train,teacher_model,idx_val,labels_val,root,idx_test,labels_test,client_id)
-    teacher_model.load_state_dict(torch.load(f'{root}/saved_model/teacher/{args.dataset}_{args.teacher_model}_{args.seed}_{client_id}.pt'))
+        train_teacher(feat,adj,idx_train,labels_train,teacher_model,idx_val,labels_val,root,idx_test,labels_test,client_id,device=device)
+    teacher_model.load_state_dict(torch.load(f'{root}/saved_model/teacher/{args.dataset}_{args.teacher_model}_{args.seed}_{client_id}.pt', map_location=device))
     if args.inference==True:
         output = teacher_model.inference(feat, inference_loader, device)
     else:
@@ -340,27 +345,27 @@ def data_gc(processed_data,client_id):
     if args.alignment == 1 and args.smoothness == 1:
         if not os.path.exists(root+'/saved_ours/feat_'+args.dataset+'_'+args.teacher_model+'_'+args.validation_model+'_'+str(args.reduction_rate)+'_'+str(args.seed)+str(client_id)+'.pt'):
             print("Condensing!")
-            train_syn(d,nclass,feat_syn,pge,feat_train,feat,adj,idx_train,num_class_dict,labels_train,teacher_model,labels_syn,n,idx_val,labels_val,root,idx_test,labels_test,client_id)
-        feat_syn=torch.load(f'{root}/saved_ours/feat_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{client_id}.pt').to(device)
-        pge.load_state_dict(torch.load(f'{root}/saved_ours/pge_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{client_id}.pt'))
+            train_syn(d,nclass,feat_syn,pge,feat_train,feat,adj,idx_train,num_class_dict,labels_train,teacher_model,labels_syn,n,idx_val,labels_val,root,idx_test,labels_test,client_id,device=device)
+        feat_syn=torch.load(f'{root}/saved_ours/feat_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{client_id}.pt', map_location=device).to(device)
+        pge.load_state_dict(torch.load(f'{root}/saved_ours/pge_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{client_id}.pt', map_location=device))
     elif args.alignment == 0 and args.smoothness == 1:
         if not os.path.exists(root+'/saved_ours/feat_without_alignment_'+args.dataset+'_'+args.teacher_model+'_'+args.validation_model+'_'+str(args.reduction_rate)+'_'+str(args.seed)+str(client_id)+'.pt'):
             print("Condensing!")
-            train_syn(d,nclass,feat_syn,pge,feat_train,feat,adj,idx_train,num_class_dict,labels_train,teacher_model,labels_syn,n,idx_val,labels_val,root,idx_test,labels_test,client_id)
-        feat_syn=torch.load(f'{root}/saved_ours/feat_without_alignment_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{client_id}.pt').to(device)
-        pge.load_state_dict(torch.load(f'{root}/saved_ours/pge_without_alignment_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{client_id}.pt'))
+            train_syn(d,nclass,feat_syn,pge,feat_train,feat,adj,idx_train,num_class_dict,labels_train,teacher_model,labels_syn,n,idx_val,labels_val,root,idx_test,labels_test,client_id,device=device)
+        feat_syn=torch.load(f'{root}/saved_ours/feat_without_alignment_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{client_id}.pt', map_location=device).to(device)
+        pge.load_state_dict(torch.load(f'{root}/saved_ours/pge_without_alignment_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{client_id}.pt', map_location=device))
     elif args.alignment == 1 and args.smoothness == 0:
         if not os.path.exists(root+'/saved_ours/feat_without_smoothness_'+args.dataset+'_'+args.teacher_model+'_'+args.validation_model+'_'+str(args.reduction_rate)+'_'+str(args.seed)+str(client_id)+'.pt'):
             print("Condensing!")
-            train_syn(d,nclass,feat_syn,pge,feat_train,feat,adj,idx_train,num_class_dict,labels_train,teacher_model,labels_syn,n,idx_val,labels_val,root,idx_test,labels_test,client_id)
-        feat_syn=torch.load(f'{root}/saved_ours/feat_without_smoothness_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{client_id}.pt').to(device)
-        pge.load_state_dict(torch.load(f'{root}/saved_ours/pge_without_smoothness_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{client_id}.pt'))
+            train_syn(d,nclass,feat_syn,pge,feat_train,feat,adj,idx_train,num_class_dict,labels_train,teacher_model,labels_syn,n,idx_val,labels_val,root,idx_test,labels_test,client_id,device=device)
+        feat_syn=torch.load(f'{root}/saved_ours/feat_without_smoothness_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{client_id}.pt', map_location=device).to(device)
+        pge.load_state_dict(torch.load(f'{root}/saved_ours/pge_without_smoothness_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{client_id}.pt', map_location=device))
     else:
         if not os.path.exists(root+'/saved_ours/feat_without_both_'+args.dataset+'_'+args.teacher_model+'_'+args.validation_model+'_'+str(args.reduction_rate)+'_'+str(args.seed)+str(client_id)+'.pt'):
             print("Condensing!")
-            train_syn(d,nclass,feat_syn,pge,feat_train,feat,adj,idx_train,num_class_dict,labels_train,teacher_model,labels_syn,n,idx_val,labels_val,root,idx_test,labels_test,client_id)
-        feat_syn=torch.load(f'{root}/saved_ours/feat_without_both_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{client_id}.pt').to(device)
-        pge.load_state_dict(torch.load(f'{root}/saved_ours/pge_without_both_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{client_id}.pt'))
+            train_syn(d,nclass,feat_syn,pge,feat_train,feat,adj,idx_train,num_class_dict,labels_train,teacher_model,labels_syn,n,idx_val,labels_val,root,idx_test,labels_test,client_id,device=device)
+        feat_syn=torch.load(f'{root}/saved_ours/feat_without_both_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{client_id}.pt', map_location=device).to(device)
+        pge.load_state_dict(torch.load(f'{root}/saved_ours/pge_without_both_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{client_id}.pt', map_location=device))
 
     #training on the condensed graph
     start = time.perf_counter()
@@ -440,9 +445,9 @@ def data_gc(processed_data,client_id):
     print("Best Test Acc:",best_test)
     torch.save(labels_syn,f'{root}/saved_ours/label_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{client_id}.pt')
     feat_syn = torch.load(
-        f'{root}/saved_ours/feat_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{client_id}.pt').detach()
+        f'{root}/saved_ours/feat_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{client_id}.pt', map_location=device).detach()
     pge.load_state_dict(torch.load(
-        f'{root}/saved_ours/pge_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{client_id}.pt'))
+        f'{root}/saved_ours/pge_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{client_id}.pt', map_location=device))
     adj_syn = pge.inference(feat_syn).detach().to(device)
     torch.save(adj_syn,
                f'{root}/saved_ours/adj_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{client_id}.pt')

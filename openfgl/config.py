@@ -87,7 +87,7 @@ parser.add_argument("--batch_size", type=int, default=128)
 # model settings
 parser.add_argument("--model", type=str, default=[], action='append')
 parser.add_argument("--num_layers", type=int, default=2)
-parser.add_argument("--hid_dim", type=int, default=64)
+parser.add_argument("--hid_dim", type=int, default=128)
 
 # evaluation settings
 parser.add_argument("--metrics", type=str, default=[], action='append')
