@@ -44,6 +44,7 @@ class FedGVDClient(BaseClient):
         in subsequent rounds using the configured loss function.
         """
         if self.message_pool["round"] == 0:
+            args.dataset = self.args.dataset[0].lower()
             if os.path.exists( f'{root}/saved_ours/feat_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{self.client_id}.pt') and os.path.exists(f'{root}/saved_ours/adj_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{self.client_id}.pt') and os.path.exists(f'{root}/saved_ours/label_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{self.client_id}.pt'):
                 feat_syn = torch.load(
                     f'{root}/saved_ours/feat_{args.dataset}_{args.teacher_model}_{args.validation_model}_{args.reduction_rate}_{args.seed}_{self.client_id}.pt', map_location=self.device).detach().to(self.device)
@@ -71,6 +72,7 @@ class FedGVDClient(BaseClient):
         elif self.message_pool["round"] == 1:
             global_feat_syn, global_label_syn, global_edge_index_syn = self.cat_syn_data()
 
+            node_offset = self.task.processed_data['data']['x'].size(0)
             self.task.processed_data['data']['x'] = torch.cat([
                 self.task.processed_data['data']['x'],
                 self.feat_syn 
@@ -83,7 +85,8 @@ class FedGVDClient(BaseClient):
             
             self.task.processed_data['data']['edge_index'] = torch.cat([
                 self.task.processed_data['data']['edge_index'], 
-                self.edge_index_syn  
+                # Shift only the merged copy; server uploads use local indices.
+                self.edge_index_syn + node_offset
             ], dim=1)
             self.task.processed_data['train_mask'] = torch.cat([self.task.processed_data['train_mask'], torch.ones(self.feat_syn.shape[0], dtype=torch.bool).to(self.device)], dim=0)
             self.task.processed_data['val_mask'] = torch.cat([self.task.processed_data['val_mask'],
@@ -112,15 +115,27 @@ class FedGVDClient(BaseClient):
             custom_loss_fn (function): A custom loss function.
         """
         def custom_loss_fn(embedding, logits, label, mask):
+            local_loss = self.task.default_loss_fn(
+                logits[:self.local_data_len][mask[:self.local_data_len]],
+                label[:self.local_data_len][mask[:self.local_data_len]],
+            )
+            synthetic_mask = mask[self.local_data_len:]
+            if not synthetic_mask.any():
+                return local_loss
+
+            synthetic_loss = self.task.default_loss_fn(
+                logits[self.local_data_len:][synthetic_mask],
+                label[self.local_data_len:][synthetic_mask],
+            )
             if self.message_pool["round"] == 1:
-                return self.task.default_loss_fn(logits[:self.local_data_len][mask[:self.local_data_len]], label[:self.local_data_len][mask[:self.local_data_len]]) + config['gama']*self.task.default_loss_fn(logits[self.local_data_len:][mask[self.local_data_len:]], label[self.local_data_len:][mask[self.local_data_len:]])
+                return local_loss + config['gama'] * synthetic_loss
             else:
                 loss_kd = 0
                 input = logits[self.local_data_len:]
                 target = self.message_pool[f"client_{self.client_id}"]["syn_logits"].to(self.device)
                 loss_kd += nn.MSELoss()(input, target)
-                return (self.task.default_loss_fn(logits[:self.local_data_len][mask[:self.local_data_len]], label[:self.local_data_len][mask[:self.local_data_len]])
-                        + config['gama']*self.task.default_loss_fn(logits[self.local_data_len:][mask[self.local_data_len:]], label[self.local_data_len:][mask[self.local_data_len:]])
+                return (local_loss
+                        + config['gama'] * synthetic_loss
                         + config['lambda'] * loss_kd)
         return custom_loss_fn
 

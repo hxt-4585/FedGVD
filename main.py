@@ -8,7 +8,7 @@ args = config.args
 args.root = "dataset"
 
 
-args.dataset = ["Cora"]
+args.dataset = ["Computers"]
 args.simulation_mode = "subgraph_fl_louvain"
 args.num_clients = 10
 
