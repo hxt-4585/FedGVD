@@ -54,6 +54,40 @@ def load_node_edge_level_default_model(args, input_dim, output_dim, client_id=No
     Returns:
         torch.nn.Module: The initialized model.
     """
+    if getattr(args, "fl_algorithm", None) == "multimodal_fedpub":
+        from openfgl.flcore.multimodal_fedpub.maskedgcn import MultimodalMaskedGCN
+        from openfgl.flcore.multimodal_fedpub.fedpub_config import config
+        if len(args.model) != 1 or args.model[0] not in ('gcn', 'multimodal_gcn'):
+            raise ValueError('multimodal_fedpub requires one shared MaskedGCN model (--model multimodal_gcn)')
+        if args.num_layers != 2:
+            raise ValueError('multimodal_fedpub preserves FED-PUB\'s two masked graph convolution layers')
+        return MultimodalMaskedGCN(input_dim, args.hid_dim, output_dim, dropout=args.dropout,
+            l1=config['l1'], laye_mask_one=config['laye_mask_one'], clsf_mask_one=config['clsf_mask_one'])
+    if getattr(args, "fl_algorithm", None) in ("multimodal_fedgvd", "multimodal_fedtad"):
+        from importlib import import_module
+        if args.fl_algorithm == "multimodal_fedtad":
+            if len(args.model) != 1:
+                raise ValueError('multimodal_fedtad requires one shared model architecture')
+            model_name = args.model[0]
+        elif client_id is None:
+            model_name = args.multimodal_server_model
+        else:
+            model_name = args.model[int(len(args.model) * client_id / args.num_clients)]
+        model_name = model_name.removeprefix("multimodal_")
+        class_names = {"gcn": "MultimodalGCN", "gat": "MultimodalGAT",
+                       "sgc": "MultimodalSGC", "mlp": "MultimodalMLP",
+                       "graphsage": "MultimodalGraphSAGE"}
+        if model_name not in class_names:
+            raise ValueError(f"Unsupported multimodal model: {model_name}")
+        module = import_module(f"openfgl.model.multimodal_{model_name}")
+        model = getattr(module, class_names[model_name])
+        result = model(input_dim=input_dim, hid_dim=args.hid_dim, output_dim=output_dim,
+                     num_layers=args.num_layers, dropout=args.dropout,
+                     fusion_temperature=getattr(args, 'multimodal_fusion_temperature', 0.5))
+        if args.fl_algorithm == 'multimodal_fedtad':
+            result.fusion_mode = 'mean'
+            result.input_mode = 'concatenated'
+        return result
     if client_id is None: # server
         model_name = args.model[0]
     else: # client

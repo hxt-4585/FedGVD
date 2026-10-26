@@ -39,10 +39,13 @@ def get_subgraph_pyg_data(global_dataset, node_list):
             local_id_tgt = global_id_to_local_id[tgt]
             local_edge_list.append((local_id_src, local_id_tgt))
             
-    local_edge_index = torch.tensor(local_edge_list).T
+    local_edge_index = torch.tensor(local_edge_list, dtype=torch.long).reshape(-1, 2).T.contiguous()
     
     
     local_subgraph = Data(x=global_dataset.x[node_list], edge_index=local_edge_index, y=global_dataset.y[node_list])
+    for feature_name in ("x_image", "x_text", "node_id", "modality_mask"):
+        if hasattr(global_dataset, feature_name):
+            setattr(local_subgraph, feature_name, getattr(global_dataset, feature_name)[node_list])
     local_subgraph.global_map = local_id_to_global_id
     
     if hasattr(global_dataset, "num_classes"):
@@ -509,7 +512,7 @@ def subgraph_fl_louvain(args, global_dataset):
     for key in partition.keys():
         partition_groups[partition[key]].append(key)
 
-    group_len_max = num_nodes // args.num_clients - args.louvain_delta
+    group_len_max = int(num_nodes // args.num_clients - args.louvain_delta)
     for group_i in groups:
         while len(partition_groups[group_i]) > group_len_max:
             long_group = list.copy(partition_groups[group_i])

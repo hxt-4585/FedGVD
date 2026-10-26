@@ -1,72 +1,149 @@
 FedGVD: Efficient Federated Graph Learning via Unidirectional Distillation with Dynamic Virtual Nodes
 
-## 项目约束
+## 新需求
+目前打算将论文扩展至多模态，参考F:\ZJUT\活\戴哲豪师兄\MM-OpenFGL
 
-不能创建新的 `.md` 文件。
+选取 Movies 和 Toys 两个文本+图像节点分类数据集，实际数据目录为服务器 `/ssd-data2/hxt2024/FedGVD/dataset/global/subgraph_fl/`。
 
-使用服务器中的虚拟环境运行。
+师兄给出的建议：
+把 FedGVD 扩展到多模态子图联邦学习。可以先参考 MM-OpenFGL，选两个文本加图像的节点分类数据集，先把原版 FedGVD 接入多模态特征，跑通基线。
+目前的想的创新点是，原方法在服务器端使用全连接来构建全局代理图，在多模态场景下，文本和图像对节点关系的判断可能不一致，全连接可能引入无关连接，影响全局模型和后续蒸馏。当然这个现象需要先通过实验验证，不能预先当作结论。如果问题确实存在，我们考虑在同一组压缩代理节点上，按文本和图像分别构建两个全局代理图，用模态相似性选择连接，并在服务器端分别训练两路图编码器。两路输出还需要根据模态可用性和预测可靠性进行融合，再把融合后的知识蒸馏给客户端。
 
-## 连接远程服务器
+目前我已经做的是从 https://github.com/mlfoundations/open_clip 开源地址直接拿来的模型 ViT-L-14
 
-| 项目 | 路径或配置 |
-| --- | --- |
-| 服务器 IP | `10.12.54.11` |
-| SSH 端口 | `22` |
-| SSH 用户名 | `hxt2024` |
-| 本机 SSH 私钥路径 | `F:\ZJUT\lab server\hxt\hxt2024` |
-| 私钥口令文件 | `F:\ZJUT\lab server\hxt\hxt.txt`（只用于认证，不回显内容） |
-| 远程项目目录 | `/ssd-data2/hxt2024/FedGVD/` |
+## 代码实现约束
+1. 减少不必要的代码可靠性判断
+2. 多模态Fedgvd的实现文件和内容结构参考原始的Fedgvd
+3. 如果model下新增多模态相关的网络结构，那么直接使用multimodal_XXX，例如multimodal_mlp
+4. 用户没有明确说明写代码，就不能修改任何文件
+5. 测试代码写在根目录下的test下
 
-在本机 PowerShell 中执行：
+## Multimodal FedGVD 实现
 
-```powershell
-ssh -p 22 -i "F:\ZJUT\lab server\hxt\hxt2024" hxt2024@10.12.54.11
+已实现 `multimodal_fedgvd`，并新增下文说明的 `multimodal_fedtad` 基线。运行时直接加载已有 CLIP 特征，不读取原始图像或重新提取特征。
+
+### 文件结构
+
+- `openfgl/model/multimodal_{gcn,gat,sgc,mlp,graphsage}.py`：客户端双通道异构模型；每个模型的文本、图像分支参数独立，客户端两路使用相同的本地拓扑。
+- `openfgl/model/multimodal_utils.py`：公共双分支结构、可靠性融合和分支监督损失。
+- `openfgl/flcore/multimodal_fedgvd/SimGC_transductive.py`：局部 MM-SGC 教师训练、联合图压缩、MM-GCN 学生验证和缓存。
+- `openfgl/flcore/multimodal_fedgvd/client.py`：首次上传压缩图，之后本地训练及服务器到客户端的蒸馏。
+- `openfgl/flcore/multimodal_fedgvd/server.py`：维护客户端压缩图、双图训练、按客户端回传预测。
+- `openfgl/flcore/multimodal_fedgvd/contrastive.py`：文本、图像两张代理图的构建，沿用原版建图文件的位置。
+- `openfgl/flcore/multimodal_fedgvd/fedgvd_config.py`：蒸馏、压缩等算法默认系数。
+- `test/test_multimodal_*.py`：模型、图构建、压缩、消息时序、加载及通信统计测试。
+
+### 训练与数据约定
+
+`x_text`、`x_image` 的行表示同一批节点；`modality_mask[:, 0]` 表示文本可用，第二列表示图像可用。没有掩码时认为两种模态都可用，不将全零特征自动解释为缺失。兼容字段 `x` 按 `[归一化图像, 归一化文本]` 拼接，双通道模型直接读取两路特征。
+
+压缩按训练集各类别样本数乘压缩率向上取整，并从真实训练节点初始化成对特征。两路特征联合优化，使用共享 PGE 学习客户端内部压缩邻接，损失包含教师分类、各模态的类别多跳特征矩对齐和加权特征平滑。平滑项使用归一化特征平方距离；与原版代码中的指数形式有区别。压缩节点的标签和模态行不会被分别排序或独立配对。仅使用训练标签优化；验证标签用于教师和压缩图选择，测试标签不进入压缩流程。
+
+服务器在相同的压缩节点上构建两张图：保留模态可用的客户端内部压缩边，分别按文本和图像余弦相似度增加跨客户端 top-k 边，再对称化、去重。相似度低于阈值的边不加入。最终版不添加原版协调器节点，因此不能仅凭结果把收益归因于稀疏化；后续对照实验需区分双通道、建图和融合的影响。
+
+两路预测使用归一化预测熵计算权重：可用模态的权重正比于 `exp(-entropy / fusion_temperature)`，缺失模态权重为零。权重停止梯度，融合 logits 为两路 logits 的加权和。两路同时缺失时返回零 logits，监督损失忽略该节点。熵是可靠性的近似指标，并不保证置信度经过校准。
+
+每个客户端首次参与时压缩并上传一次；第二次参与时追加自己的压缩节点，训练真实节点和压缩节点的监督目标；第三次起增加上一轮服务器预测的 MSE 蒸馏。服务器不聚合客户端模型参数。原始验证/测试图保持独立，只统计真实节点；每个客户端的压缩节点索引与服务器预测按 client_id 对齐。部分客户端参与时，服务器缓存已上传图并在新客户端加入时重建双图。
+
+压缩缓存包含图特征、拓扑、训练/验证划分和压缩参数的指纹，不匹配时重新生成。缓存默认位于算法目录的 `saved_ours/`；测试缓存建议单独指定路径。当前支持 `subgraph_fl`、`node_cls`、`processing=raw`、`dp_mech=no_dp`。
+
+### Multimodal FedTAD 基线
+
+算法目录为 `openfgl/flcore/multimodal_fedtad/`，统一以 [OpenFGL 的 FedTAD](https://github.com/xkLi-Allen/OpenFGL/tree/main/openfgl/flcore/fedtad) 为参照。已逐文件校验该目录与本仓库 `fedtad/` 一致（仅 CRLF/LF 换行差异）。多模态服务器代码与原版仅类名、配置导入不同；保留按节点数聚合参数、条件生成器、语义/多样性/对抗差异损失、CKR 加权蒸馏、梯度与 detach 位置、循环次序和模型参数下发。客户端继承原版收发及本地交叉熵训练。原版 `fedtad/` 源文件不修改。
+
+这是同构基线：默认所有客户端和服务器使用 `multimodal_gcn`，也可用一个 `--model multimodal_gat` 等替换；不支持同时指定多个模型。两路编码器参数独立、共享图拓扑，logits 在可用模态间等权平均，不使用 FedGVD 的熵可靠性融合或双全局图，不额外增加分支监督。
+
+模型及训练默认值与本仓库 OpenFGL 设置对齐：每个分支两层 GCN，隐藏维度 128、Dropout 0.5；显式 `--hid_dim` 优先。`main.py` 对原版 FedTAD 和多模态版本均调用相同的随机种子设置，不再混用作者独立 FedTAD 仓库的隐藏维度 64。
+
+输入统一采用现有数据加载器的 `x=[image, text]`，原版单分支读取整个 `x`，多模态模型按维度切开后送入两路，不在分支中额外归一化。真实 Movies/Toys 的 `x` 已由公共加载器分别归一化两种模态；生成器输出保持原始数值尺度。服务器直接复用原版生成器和建图函数：仅对完整生成向量整体归一化以计算余弦相似度，构建一张 top-k 伪图，保留原版自环约定；模型输入仍是未归一化的生成向量。类别可靠性加权的是不同客户端教师的损失，与模态融合权重不同。
+
+CKR 完整保留原版计算、归一化及缓存流程：使用相同的 `data.x`、拓扑嵌入、训练节点与邻居循环。缓存目录为 `<客户端数据目录>/ckr_multimodal_fedtad/client_<id>.pt`，与原版 `ckr/` 隔离。已有缓存直接读取；没有缓存则计算；`multimodal_fedtad/fedtad_config.py` 中 `save_ckr=True` 时才保存。默认 `False` 与原版一致，但不阻止读取已有缓存。缓存不包含数据指纹（同原版），更换特征或训练划分后需清理对应缓存。CKR 缓存只是类别可靠性向量，不是模型权重或压缩图。
+
+PyCharm 的 **Script parameters** 填入：
+
+```text
+--fl_algorithm multimodal_fedtad --dataset Movies
 ```
 
-用户名是 `hxt2024`，不是 `hxt`。该私钥已加密；出现 `Enter passphrase for key` 时输入私钥口令。首次连接时核对服务器指纹，再确认连接。
+Toys 改成 `--fl_algorithm multimodal_fedtad --dataset Toys`。不传算法仍默认运行 `multimodal_fedgvd`；GPU 继续由运行环境的 `CUDA_VISIBLE_DEVICES` 指定。两种算法复用相同的数据划分和默认本地评估方式。若比较算法本身，FedGVD 也应使用 `--model multimodal_gcn` 统一模型条件，避免将异构模型影响混入对比。
 
-登录后进入项目目录：
+默认 100 轮、每轮客户端训练 3 epoch；服务器每轮 5 次生成/蒸馏循环，每次生成器 1 步、全局模型 5 步，生成 100 个节点。算法配置与原版逐项一致，位于 `multimodal_fedtad/fedtad_config.py`。保留原版 `raw_distill`/`rep_distill` 代码分支，默认并验证的是 `raw_distill`；原版 `rep_distill` 将隐藏维度生成特征送入输入编码器，存在输入维度兼容限制，Movies/Toys 当前配置不可直接切换，未另行改造其算法。没有额外增加每类至少一个生成节点或截断 top-k 的行为。
+
+不读取 FedGVD 压缩缓存，也不产生压缩图缓存或最佳模型权重文件。`test/test_multimodal_fedtad.py` 验证模态融合、原始特征尺度、生成梯度、CKR 缓存及数值一致性，并将相同双分支模型接入原版和多模态服务器：相同初值、随机种子下，含 Dropout 的两轮默认模式更新后，服务器与生成器参数逐项完全一致。该检查验证训练流程对齐，不表示单分支与双分支模型的实验精度相同。
+
+### Multimodal FED-PUB 基线
+
+算法目录为 `openfgl/flcore/multimodal_fedpub/`，通过 `--fl_algorithm multimodal_fedpub` 选择。文本和图像各使用独立的两层 MaskedGCN 加掩码分类器，直接复用单模态 `fedpub/maskedgcn.py` 的掩码卷积、分类器及推理剪枝；隐藏维度由 `--hid_dim` 指定，两种模态输入维度可以不同。参数聚合要求所有客户端模型同构，因此只接受单个 `--model multimodal_gcn`（或 `gcn`）和 `--num_layers 2`。
+
+沿用 FedTAD 基线的数据约定，从 `data.x=[image, text]` 切分输入，保留加载器给出的数值尺度；公共代理图的高斯特征不额外归一化。两路 logits 在可用模态间等权平均，隐藏表示按 `[text, image]` 拼接。支持 `modality_mask[:, 0/1]` 指示文本/图像是否可用，缺失分支节点不参与消息传播，两种模态同时缺失时输出零。监督项保持原版的融合 logits 交叉熵，不添加分支监督、蒸馏或可靠性融合。
+
+保留 FED-PUB 的三个机制：① 客户端保留本地可学习掩码，并使用掩码 L1 正则、相对本轮下载权重的 L2 范数正则（第 0 轮不加 L2）；② 服务器固定生成公共随机分块代理图，默认 5 个各含 100 节点的分块、块内概率 0.1、块间无边、标准高斯节点特征，客户端上传代理图上隐藏表示的节点均值；③ 服务器用功能嵌入余弦相似度，经 `exp(10 * similarity)` 行归一化后产生各客户端个性化参数，同时保留按节点数聚合的全局参数，供首次参与客户端使用。算法系数位于 `multimodal_fedpub/fedpub_config.py`，默认复制单模态配置。
+
+多模态版本修正了原本地实现中影响机制生效的细节：正则项使用 `named_parameters()` 保留梯度；下载、上传和正则锚点使用独立快照；个性化权重按客户端 ID 缓存，支持部分参与及重新加入；零功能嵌入的相似度按零处理，无法归一化的行回退为等权聚合。默认指数归一化采用等价的行最大值平移防溢出。单模态 `fedpub/` 不修改。常规非零嵌入下，聚合结果与原版在数值容差内一致。
+
+在服务器项目目录、已有 `fedgvd` 虚拟环境中运行：
 
 ```bash
-cd /ssd-data2/hxt2024/FedGVD/
-pwd
+python main.py --fl_algorithm multimodal_fedpub --dataset Movies
+python main.py --fl_algorithm multimodal_fedpub --dataset Toys
 ```
 
-`pwd` 应输出 `/ssd-data2/hxt2024/FedGVD`。连接后默认目录为 `/home/hxt2024`，需要手动切换。结束连接时执行 `exit`。
+默认 10 个客户端、100 轮、每轮本地 3 epoch，隐藏维度 128、Dropout 0.5；GPU 由 `CUDA_VISIBLE_DEVICES` 和逻辑编号 `--gpuid` 控制。短轮检查可以加 `--num_rounds 3 --num_epochs 1 --hid_dim 16 --client_frac 0.5`。评估使用 `local_model_on_local_data`（默认）或 `local_model_on_global_data`，不支持全局模型评估模式。该基线不读取或产生 FedGVD 压缩缓存。
 
-### Windows OpenSSH 私钥权限报错时
+`test/test_multimodal_fedpub.py` 检查双分支与原始 MaskedGCN 的数值对齐、随机代理图、相似度聚合、正则梯度、掩码保留和剪枝、模态缺失、消息快照及部分客户端参与。
 
-当前本机 OpenSSH 曾因私钥权限过宽报 `UNPROTECTED PRIVATE KEY FILE` / `bad permissions`，并忽略私钥。此前成功连接使用的是本机已安装的 Python `paramiko`，读取同一私钥完成认证，没有修改私钥文件或权限。
+### 服务器运行
 
-可用以下 Python 代码连接并确认远程项目目录；口令通过交互输入，代码中不保存明文口令：
+默认算法已设为 `multimodal_fedgvd`。在项目根目录、使用服务器虚拟环境直接运行 `python main.py`，即可训练 Movies；默认数据根目录为 `dataset`，使用进程可见的第 0 张 GPU。训练 Toys 使用 `python main.py --dataset Toys`。运行原版可显式指定 `--fl_algorithm fedgvd --dataset Computers`。
 
-```python
-from getpass import getpass
-import paramiko
+GPU 由运行环境控制，代码不覆盖 `CUDA_VISIBLE_DEVICES` 或 `CUDA_DEVICE_ORDER`。在 PyCharm 的环境变量中设置 `CUDA_DEVICE_ORDER=PCI_BUS_ID;CUDA_VISIBLE_DEVICES=7`，并保持 `--gpuid` 默认值 0，即使用物理 GPU 7。`--gpuid` 是可见设备列表中的逻辑编号；只暴露一张卡时应使用 0。切换物理 GPU 只需修改环境变量。
 
-key = paramiko.RSAKey.from_private_key_file(
-    r"F:\ZJUT\lab server\hxt\hxt2024",
-    password=getpass("SSH 私钥口令："),
-)
-client = paramiko.SSHClient()
-client.load_system_host_keys()
-try:
-    client.connect(
-        "10.12.54.11",
-        port=22,
-        username="hxt2024",
-        pkey=key,
-        allow_agent=False,
-        look_for_keys=False,
-        timeout=10,
-    )
-    _, stdout, stderr = client.exec_command(
-        "cd /ssd-data2/hxt2024/FedGVD/ && pwd"
-    )
-    print(stdout.read().decode())
-    print(stderr.read().decode())
-finally:
-    client.close()
+在 `/ssd-data2/hxt2024/FedGVD/` 下使用已有虚拟环境，分别运行两个数据集：
+
+```bash
+CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=4 /ssd-data2/hxt2024/envs/fedgvd/bin/python main.py \
+  --fl_algorithm multimodal_fedgvd --dataset Movies \
+  --root /ssd-data2/hxt2024/FedGVD/dataset --gpuid 0 \
+  --debug True --comm_cost True
+
+CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=4 /ssd-data2/hxt2024/envs/fedgvd/bin/python main.py \
+  --fl_algorithm multimodal_fedgvd --dataset Toys \
+  --root /ssd-data2/hxt2024/FedGVD/dataset --gpuid 0 \
+  --debug True --comm_cost True
 ```
 
-后续对话需要连接服务器时，使用上述用户名、私钥及远程项目目录；私钥内容和口令不写入 README 或命令输出。
+GPU 编号应按服务器当前空闲情况选择。默认 10 个客户端、100 轮，依次分配双通道 GCN、GAT、SGC、MLP、GraphSAGE，每种两个客户端；服务器独立使用 `multimodal_gcn`。可重复传入 `--model multimodal_gat --model multimodal_graphsage` 指定客户端模型组合。每次只运行一个数据集。
+
+主要参数：
+
+| 参数 | 默认值 | 含义 |
+| --- | --- | --- |
+| `--multimodal_reduction_rate` | 0.2 | 相对各客户端训练节点的压缩率 |
+| `--multimodal_teacher_epochs` | 1000 | 压缩教师训练轮数 |
+| `--multimodal_condense_epochs` | 1500 | 压缩优化轮数 |
+| `--multimodal_student_epochs` | 3000 | 每次压缩验证的学生训练轮数 |
+| `--multimodal_validation_interval` | 100 | 教师评估与压缩图验证间隔 |
+| `--multimodal_server_epochs` | 10 | 每轮服务器训练轮数 |
+| `--multimodal_cross_k` | 2 | 每节点每模态选择的跨客户端近邻数，对称化后度数可能更高 |
+| `--multimodal_similarity_threshold` | 0.0 | 跨客户端余弦相似度下限 |
+| `--multimodal_fusion_temperature` | 0.5 | 熵权重温度，必须大于零 |
+
+默认压缩验证开销较大。快速检查可在上述命令后添加以下参数；三轮才能覆盖首次蒸馏：
+
+```bash
+--num_rounds 3 --num_epochs 1 --hid_dim 16 \
+--multimodal_reduction_rate 0.02 \
+--multimodal_teacher_epochs 2 --multimodal_condense_epochs 2 \
+--multimodal_student_epochs 2 --multimodal_validation_interval 2 \
+--multimodal_server_epochs 2 \
+--multimodal_condensed_pattern '/tmp/fedgvd-smoke/{dataset}_{seed}_{client_id}.pt'
+```
+
+测试命令（无需 pytest）：
+
+```bash
+/ssd-data2/hxt2024/envs/fedgvd/bin/python -B -m unittest discover \
+  -s test -p 'test_multimodal_*.py' -v
+```
+
+本地维护源代码，服务器运行；同步时仅传输本次修改的源码、测试和本 README，并校验文件内容，不覆盖数据集、实验结果或虚拟环境。

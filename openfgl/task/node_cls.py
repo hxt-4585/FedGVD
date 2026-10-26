@@ -158,7 +158,10 @@ class NodeClsTask(BaseTask):
         Returns:
             torch.nn.Module: Default model.
         """
-        return load_node_edge_level_default_model(self.args, input_dim=self.num_feats, output_dim=self.num_global_classes, client_id=self.client_id)
+        input_dim = self.num_feats
+        if self.args.fl_algorithm in ("multimodal_fedgvd", "multimodal_fedtad", "multimodal_fedpub"):
+            input_dim = (self.data.x_text.size(1), self.data.x_image.size(1))
+        return load_node_edge_level_default_model(self.args, input_dim=input_dim, output_dim=self.num_global_classes, client_id=self.client_id)
     
     @property
     def default_optim(self):
@@ -231,7 +234,7 @@ class NodeClsTask(BaseTask):
         else:
             name = self.args.dataset[0]
             
-        if name in ["Cora", "CiteSeer", "PubMed", "CS", "Physics", "Photo", "Computers"]:
+        if name in ["Cora", "CiteSeer", "PubMed", "CS", "Physics", "Photo", "Computers", "Movies", "Toys"]:
             return 0.2, 0.4, 0.4
         elif name in ["Chameleon", "Squirrel"]:
             return 0.48, 0.32, 0.20
@@ -383,6 +386,3 @@ class NodeClsTask(BaseTask):
         val_mask = val_mask.bool()
         test_mask = test_mask.bool()
         return train_mask, val_mask, test_mask
-    
-    
-    

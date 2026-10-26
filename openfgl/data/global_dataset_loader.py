@@ -61,6 +61,9 @@ def load_global_dataset(root, scenario, dataset):
         elif dataset in ["Photo", "Computers"]:
             from torch_geometric.datasets import Amazon
             return Amazon(root=osp.join(root, "subgraph_fl"), name=dataset)
+        elif dataset in ["Movies", "Toys"]:
+            from openfgl.data.magb_clip_dataset import MAGBClipDataset
+            return MAGBClipDataset(root=osp.join(root, "subgraph_fl", dataset))
         elif dataset in ["CS", "Physics"]:
             from torch_geometric.datasets import Coauthor
             return Coauthor(root=osp.join(root, "subgraph_fl"), name=dataset)

@@ -79,6 +79,9 @@ def load_client(args, client_id, data, data_dir, message_pool, device):
     elif args.fl_algorithm == "fedpub":
         from openfgl.flcore.fedpub.client import FedPubClient
         return FedPubClient(args, client_id, data, data_dir, message_pool, device)
+    elif args.fl_algorithm == "multimodal_fedpub":
+        from openfgl.flcore.multimodal_fedpub.client import MultimodalFedPubClient
+        return MultimodalFedPubClient(args, client_id, data, data_dir, message_pool, device)
     elif args.fl_algorithm == "fedstar":
         from openfgl.flcore.fedstar.client import FedStarClient
         return FedStarClient(args, client_id, data, data_dir, message_pool, device)
@@ -88,6 +91,9 @@ def load_client(args, client_id, data, data_dir, message_pool, device):
     elif args.fl_algorithm == "fedtad":
         from openfgl.flcore.fedtad.client import FedTADClient
         return FedTADClient(args, client_id, data, data_dir, message_pool, device)
+    elif args.fl_algorithm == "multimodal_fedtad":
+        from openfgl.flcore.multimodal_fedtad.client import MultimodalFedTADClient
+        return MultimodalFedTADClient(args, client_id, data, data_dir, message_pool, device)
     elif args.fl_algorithm == "fedsage_plus":
         from openfgl.flcore.fedsage_plus.client import FedSagePlusClient
         return FedSagePlusClient(args, client_id, data, data_dir, message_pool, device)
@@ -112,6 +118,9 @@ def load_client(args, client_id, data, data_dir, message_pool, device):
     elif args.fl_algorithm == "fedgvd":
         from openfgl.flcore.fedgvd.client import FedGVDClient
         return FedGVDClient(args, client_id, data, data_dir, message_pool, device)
+    elif args.fl_algorithm == "multimodal_fedgvd":
+        from openfgl.flcore.multimodal_fedgvd.client import MultimodalFedGVDClient
+        return MultimodalFedGVDClient(args, client_id, data, data_dir, message_pool, device)
     
 def load_server(args, global_data, data_dir, message_pool, device):
     """
@@ -154,6 +163,9 @@ def load_server(args, global_data, data_dir, message_pool, device):
     elif args.fl_algorithm == "fedpub":
         from openfgl.flcore.fedpub.server import FedPubServer
         return FedPubServer(args, global_data, data_dir, message_pool, device)
+    elif args.fl_algorithm == "multimodal_fedpub":
+        from openfgl.flcore.multimodal_fedpub.server import MultimodalFedPubServer
+        return MultimodalFedPubServer(args, global_data, data_dir, message_pool, device)
     elif args.fl_algorithm == "fedstar":
         from openfgl.flcore.fedstar.server import FedStarServer
         return FedStarServer(args, global_data, data_dir, message_pool, device)
@@ -163,6 +175,9 @@ def load_server(args, global_data, data_dir, message_pool, device):
     elif args.fl_algorithm == "fedtad":
         from openfgl.flcore.fedtad.server import FedTADServer
         return FedTADServer(args, global_data, data_dir, message_pool, device)
+    elif args.fl_algorithm == "multimodal_fedtad":
+        from openfgl.flcore.multimodal_fedtad.server import MultimodalFedTADServer
+        return MultimodalFedTADServer(args, global_data, data_dir, message_pool, device)
     elif args.fl_algorithm == "fedsage_plus":
         from openfgl.flcore.fedsage_plus.server import FedSagePlusServer
         return FedSagePlusServer(args, global_data, data_dir, message_pool, device)
@@ -187,6 +202,9 @@ def load_server(args, global_data, data_dir, message_pool, device):
     elif args.fl_algorithm == "fedgvd":
         from openfgl.flcore.fedgvd.server import FedGVDServer
         return FedGVDServer(args, global_data, data_dir, message_pool, device)
+    elif args.fl_algorithm == "multimodal_fedgvd":
+        from openfgl.flcore.multimodal_fedgvd.server import MultimodalFedGVDServer
+        return MultimodalFedGVDServer(args, global_data, data_dir, message_pool, device)
     
 def load_optim(args):
     """
@@ -323,4 +341,3 @@ def model_complexity(model:torch.nn.Module):
     from fvcore.nn import FlopCountAnalysis, parameter_count
     params = sum([val for val in parameter_count(model).values()])
     return params
-    

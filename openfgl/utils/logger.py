@@ -62,7 +62,11 @@ class Logger:
             for client_id in self.message_pool["sampled_clients"]:
                 comm_cost += total_size(self.message_pool[f'client_{client_id}'])
             
-            if self.personalized:
+            if self.args.fl_algorithm == "multimodal_fedgvd":
+                targets = self.message_pool['server']['syn_logits']
+                comm_cost += sum(total_size(targets[cid])
+                                 for cid in self.message_pool['sampled_clients'] if cid in targets)
+            elif self.personalized:
                 comm_cost += total_size(self.message_pool[f'server'])
             else:
                 comm_cost += len(self.message_pool['sampled_clients']) * total_size(self.message_pool[f'server'])

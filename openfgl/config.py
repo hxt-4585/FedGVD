@@ -7,7 +7,7 @@ supported_graph_fl_datasets = [
 "AIDS", "BZR", "COLLAB", "COX2", "DD", "DHFR", "ENZYMES", "IMDB-BINARY", "IMDB-MULTI", "MUTAG", "NCI1", "PROTEINS", "PTC_MR", "hERG", "ogbg-molhiv", "ogbg-molpca", "ogbg-ppa", "ogbg-code2"]
 supported_subgraph_fl_datasets = [
 "Cora", "CiteSeer", "PubMed", "CS", "Physics", "Computers", "Photo", "Chameleon", "Squirrel", "ogbn-arxiv", "ogbn-products", "Tolokers", "Actor", \
-"Amazon-ratings", "Roman-empire", "Questions", "Minesweeper", "Reddit", "Flickr"]
+"Amazon-ratings", "Roman-empire", "Questions", "Minesweeper", "Reddit", "Flickr", "Movies", "Toys"]
 
 
 supported_graph_fl_simulations = ["graph_fl_cross_domain", "graph_fl_label_skew", "graph_fl_topology_skew", "graph_fl_feature_skew"]
@@ -17,7 +17,7 @@ supported_graph_fl_task = ["graph_cls", "graph_reg"]
 supported_subgraph_fl_task = ["node_cls", "link_pred", "node_clust"]
 
 
-supported_fl_algorithm = ["isolate", "fedavg", "fedprox", "scaffold", "moon", "feddc", "fedproto", "fedtgp", "fedpub", "fedstar", "fedgta", "fedtad", "gcfl_plus", "fedsage_plus", "adafgl", "feddep", "fggp", "fgssl", "fedgl", "fedgvd"]
+supported_fl_algorithm = ["isolate", "fedavg", "fedprox", "scaffold", "moon", "feddc", "fedproto", "fedtgp", "fedpub", "fedstar", "fedgta", "fedtad", "gcfl_plus", "fedsage_plus", "adafgl", "feddep", "fggp", "fgssl", "fedgl", "fedgvd", "multimodal_fedgvd", "multimodal_fedtad", "multimodal_fedpub"]
 
 
 supported_metrics = ["accuracy", "precision", "f1", "recall", "auc", "ap", "clustering_accuracy", "nmi", "ari"]
@@ -34,8 +34,8 @@ parser = argparse.ArgumentParser()
 
 # environment settings
 parser.add_argument("--use_cuda", type=bool, default=True)
-parser.add_argument("--gpuid", type=int, default=0)
-parser.add_argument("--seed", type=int, default=2024)
+parser.add_argument("--gpuid", type=int, default=0, help="Logical GPU index within CUDA_VISIBLE_DEVICES (default: 0)")
+parser.add_argument("--seed", type=int, default=42)
 
 # global dataset settings 
 parser.add_argument("--root", type=str, default="change_to_your_root_path")
@@ -58,8 +58,20 @@ parser.add_argument("--hete_injection_ratio", type=float, default=0.)
 # fl settings
 parser.add_argument("--num_clients", type=int, default=10)
 parser.add_argument("--num_rounds", type=int, default=100)
-parser.add_argument("--fl_algorithm", type=str, default="fedavg", choices=supported_fl_algorithm)
+parser.add_argument("--fl_algorithm", type=str, default="multimodal_fedgvd", choices=supported_fl_algorithm)
 parser.add_argument("--client_frac", type=float, default=1.0)
+parser.add_argument("--multimodal_reduction_rate", type=float, default=0.2)
+parser.add_argument("--multimodal_condensed_pattern", type=str, default="openfgl/flcore/multimodal_fedgvd/saved_ours/graph_{dataset}_MM-SGC_GCN_{reduction_rate}_{seed}_{client_id}.pt")
+parser.add_argument("--multimodal_teacher_epochs", type=int, default=1000)
+parser.add_argument("--multimodal_condense_epochs", type=int, default=1500)
+parser.add_argument("--multimodal_student_epochs", type=int, default=3000)
+parser.add_argument("--multimodal_validation_interval", type=int, default=100)
+parser.add_argument("--multimodal_server_epochs", type=int, default=10)
+parser.add_argument("--multimodal_server_model", choices=("multimodal_gcn", "multimodal_gat", "multimodal_sgc", "multimodal_mlp", "multimodal_graphsage"), default="multimodal_gcn")
+parser.add_argument("--multimodal_server_mode", choices=("dual_knn",), default="dual_knn")
+parser.add_argument("--multimodal_cross_k", type=int, default=2)
+parser.add_argument("--multimodal_similarity_threshold", type=float, default=0.0)
+parser.add_argument("--multimodal_fusion_temperature", type=float, default=0.5)
 
 
 # simulation settings

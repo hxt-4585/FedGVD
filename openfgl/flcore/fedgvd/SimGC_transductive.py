@@ -13,6 +13,7 @@ import torch_sparse
 import os 
 import gc
 import math
+from openfgl.config import args as fl_args
 
 from openfgl.flcore.fedgvd.utils import *
 from torch_sparse import SparseTensor
@@ -28,7 +29,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--gpu_id', type=int, default=0, help='gpu id')
 parser.add_argument('--parallel_gpu_ids', type=list, default=[0,1,2], help='gpu id')
 parser.add_argument('--dataset', type=str, default='cora')
-parser.add_argument('--seed', type=int, default=23, help='Random seed.')
+parser.add_argument('--seed', type=int, default=42, help='Random seed.')
 #gnn
 parser.add_argument('--nlayers', type=int, default=2)
 parser.add_argument('--hidden', type=int, default=256)
@@ -62,6 +63,8 @@ parser.add_argument('--student_model_loop', type=int, default=3000)
 parser.add_argument('--teacher_val_stage', type=int, default=50)
 parser.add_argument('--student_val_stage', type=int, default=100)
 args = parser.parse_args()
+if len(fl_args.dataset) == 1:
+    args.dataset = fl_args.dataset[0].lower()
 print(args)
 
 # device='cuda'
