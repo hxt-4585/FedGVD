@@ -5,7 +5,7 @@ from openfgl.flcore.base import BaseServer
 from openfgl.model.multimodal_utils import multimodal_supervised_loss
 from .contrastive import get_coordinated_data
 from .fedgvd_config import config
-from .utils import graph_from_payload
+from .utils import graph_from_payload, graph_to_payload
 
 
 class MultimodalFedGVDServer(BaseServer):
@@ -48,4 +48,12 @@ class MultimodalFedGVDServer(BaseServer):
                            for cid, part in self.client_slices.items()}
 
     def send_message(self):
-        self.message_pool['server'] = {'syn_logits': self.syn_logits}
+        graphs = {}
+        for recipient in self.message_pool.get('sampled_clients', []):
+            known = self.message_pool.get(f'client_{recipient}', {}).get('known_graph_ids', [])
+            graphs[recipient] = {
+                cid: graph_to_payload(graph)
+                for cid, graph in self.graph_cache.items()
+                if cid != recipient and cid not in known
+            }
+        self.message_pool['server'] = {'syn_logits': self.syn_logits, 'graphs': graphs}

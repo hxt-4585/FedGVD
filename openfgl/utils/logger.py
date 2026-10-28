@@ -64,8 +64,11 @@ class Logger:
             
             if self.args.fl_algorithm == "multimodal_fedgvd":
                 targets = self.message_pool['server']['syn_logits']
-                comm_cost += sum(total_size(targets[cid])
-                                 for cid in self.message_pool['sampled_clients'] if cid in targets)
+                graphs = self.message_pool['server']['graphs']
+                for recipient in self.message_pool['sampled_clients']:
+                    comm_cost += sum(total_size(logits) for cid, logits in targets.items()
+                                     if cid != recipient)
+                    comm_cost += total_size(graphs.get(recipient, {}))
             elif self.personalized:
                 comm_cost += total_size(self.message_pool[f'server'])
             else:

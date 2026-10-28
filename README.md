@@ -43,7 +43,7 @@ FedGVD: Efficient Federated Graph Learning via Unidirectional Distillation with 
 
 两路预测使用归一化预测熵计算权重：可用模态的权重正比于 `exp(-entropy / fusion_temperature)`，缺失模态权重为零。权重停止梯度，融合 logits 为两路 logits 的加权和。两路同时缺失时返回零 logits，监督损失忽略该节点。熵是可靠性的近似指标，并不保证置信度经过校准。
 
-每个客户端首次参与时压缩并上传一次；第二次参与时追加自己的压缩节点，训练真实节点和压缩节点的监督目标；第三次起增加上一轮服务器预测的 MSE 蒸馏。服务器不聚合客户端模型参数。原始验证/测试图保持独立，只统计真实节点；每个客户端的压缩节点索引与服务器预测按 client_id 对齐。部分客户端参与时，服务器缓存已上传图并在新客户端加入时重建双图。
+每个客户端首次参与时压缩并上传一次；第二次参与时追加服务器已收集的其他客户端压缩子图（排除自身），训练本地真实节点和其他客户端压缩节点的监督目标；第三次起增加对应压缩节点的上一轮服务器预测 MSE 蒸馏。保持原有损失系数及蒸馏开始时序。没有其他客户端子图时只训练本地真实节点。服务器不聚合客户端模型参数。原始验证/测试图保持独立，只统计真实节点；压缩节点及 logits 都按来源 client_id 升序拼接，保持节点顺序一致。部分客户端参与时，服务器缓存已上传图，在新客户端加入时重建双图，并向参与客户端补发尚未确认接收的其他客户端子图；客户端从原始训练图重建增广图，避免重复追加。常规轮次只下发 logits，通信量统计包含其他客户端 logits 和新增子图。
 
 压缩缓存包含图特征、拓扑、训练/验证划分和压缩参数的指纹，不匹配时重新生成。缓存默认位于算法目录的 `saved_ours/`；测试缓存建议单独指定路径。当前支持 `subgraph_fl`、`node_cls`、`processing=raw`、`dp_mech=no_dp`。
 
@@ -112,7 +112,15 @@ CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=4 /ssd-data2/hxt2024/envs/fedg
   --debug True --comm_cost True
 ```
 
-GPU 编号应按服务器当前空闲情况选择。默认 10 个客户端、100 轮，依次分配双通道 GCN、GAT、SGC、MLP、GraphSAGE，每种两个客户端；服务器独立使用 `multimodal_gcn`。可重复传入 `--model multimodal_gat --model multimodal_graphsage` 指定客户端模型组合。每次只运行一个数据集。
+GPU 编号应按服务器当前空闲情况选择。默认 10 个客户端、100 轮，客户端和服务器均使用 `multimodal_gcn`。可重复传入 `--model multimodal_gat --model multimodal_graphsage` 指定客户端模型组合。每次只运行一个数据集。
+
+跨客户端子图修复的基线为 `multimodal-fedgvd` 分支提交 `3274f73`，修复分支为 `fix/multimodal-fedgvd-cross-client`。PyCharm 使用原 SSH 解释器 `/ssd-data2/hxt2024/envs/fedgvd/bin/python`，脚本为项目的 `main.py`，远程工作目录为 `/ssd-data2/hxt2024/FedGVD`。Script parameters 可填写：
+
+```text
+--fl_algorithm multimodal_fedgvd --dataset Movies --model multimodal_gcn --num_layers 2 --hid_dim 128 --gpuid 0 --train_val_test 0.6-0.2-0.2 --num_clients 10 --client_frac 1.0 --num_rounds 100 --num_epochs 3 --lr 0.01 --weight_decay 0.0005 --dropout 0.5 --seed 42 --multimodal_reduction_rate 0.2 --multimodal_server_model multimodal_gcn --multimodal_server_epochs 10 --evaluation_mode local_model_on_local_data --debug True --comm_cost True --log_root logs/multimodal_fedgvd_cross_client --log_name Movies_gcn_seed42
+```
+
+Environment variables 沿用截图：`PYTHONUNBUFFERED=1;CUDA_DEVICE_ORDER=PCI_BUS_ID;CUDA_VISIBLE_DEVICES=6`，对应参数仍为逻辑设备 `--gpuid 0`。Toys 改为 `--dataset Toys --log_name Toys_gcn_seed42`。不同种子同时修改 `--seed` 与 `--log_name`，避免覆盖日志。正式运行前通过原 PyCharm 映射同步修复分支代码。压缩过程未变，指纹一致的原凝缩缓存可以复用；10 个客户端全参与后，每个客户端训练本地真实图加另外 9 个客户端的凝缩子图，显存需求会高于旧版。
 
 主要参数：
 
