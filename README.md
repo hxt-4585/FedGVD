@@ -29,7 +29,8 @@ FedGVD: Efficient Federated Graph Learning via Unidirectional Distillation with 
 - `openfgl/flcore/multimodal_fedgvd/SimGC_transductive.py`：局部 MM-SGC 教师训练、联合图压缩、MM-GCN 学生验证和缓存。
 - `openfgl/flcore/multimodal_fedgvd/client.py`：首次上传压缩图，之后本地训练及服务器到客户端的蒸馏。
 - `openfgl/flcore/multimodal_fedgvd/server.py`：维护客户端压缩图、双图训练、按客户端回传预测。
-- `openfgl/flcore/multimodal_fedgvd/contrastive.py`：文本、图像两张代理图的构建，沿用原版建图文件的位置。
+- `openfgl/flcore/multimodal_fedgvd/contrastive.py`：压缩子图拼接及旧版余弦直连基线。
+- `openfgl/flcore/multimodal_fedgvd/virtual.py`：双模态可学习虚拟节点、动态虚拟节点连接及辅助损失。
 - `openfgl/flcore/multimodal_fedgvd/fedgvd_config.py`：蒸馏、压缩等算法默认系数。
 - `test/test_multimodal_*.py`：模型、图构建、压缩、消息时序、加载及通信统计测试。
 
@@ -39,7 +40,23 @@ FedGVD: Efficient Federated Graph Learning via Unidirectional Distillation with 
 
 压缩按训练集各类别样本数乘压缩率向上取整，并从真实训练节点初始化成对特征。两路特征联合优化，使用共享 PGE 学习客户端内部压缩邻接，损失包含教师分类、各模态的类别多跳特征矩对齐和加权特征平滑。平滑项使用归一化特征平方距离；与原版代码中的指数形式有区别。压缩节点的标签和模态行不会被分别排序或独立配对。仅使用训练标签优化；验证标签用于教师和压缩图选择，测试标签不进入压缩流程。
 
-服务器在相同的压缩节点上构建两张图：保留模态可用的客户端内部压缩边，分别按文本和图像余弦相似度增加跨客户端 top-k 边，再对称化、去重。相似度低于阈值的边不加入。最终版不添加原版协调器节点，因此不能仅凭结果把收益归因于稀疏化；后续对照实验需区分双通道、建图和融合的影响。
+服务器默认使用 `--multimodal_server_mode dual_virtual`：在相同的压缩节点上建立文本、图像两张图，每个客户端新增一个共享编号的虚拟节点，分别保存文本/图像特征。每个模态用独立可学习 query 按余弦相似度做 softmax 加权汇聚，再通过独立 MLP（输入维度→hid_dim→输入维度，GELU）生成虚拟节点特征。保留可用模态的子图内部边，添加所属压缩节点与虚拟节点的双向连接；仅在虚拟节点之间选择每行 top-k 邻居，再取对称并集、去重，因此最终度数可能大于 k。新增边权为 1，避免负余弦值引起 GCN 负度数；原压缩边权保留。每个服务器优化步重新计算虚拟特征和 top-k 关系，特征路径保留梯度，离散选边不求导。虚拟节点及其预测只存在于服务器，下发仍是各原压缩节点融合后的 logits。
+
+`--multimodal_server_mode dual_knn` 保留上一版：按文本/图像余弦相似度直接连接不同客户端的压缩节点。`--multimodal_cross_k`（默认 2）在两种模式中分别控制压缩节点/虚拟节点的邻居选择数量；`--multimodal_similarity_threshold` 只作用于 dual_knn。虚拟模式遵循论文 top-k 选择，不额外使用阈值。单客户端或某模态只有一个有效虚拟节点时，该模态没有跨客户端边，对比损失为零。
+
+虚拟模式服务端目标为 `L_syn + virtual_ce_weight * L_virtual_ce + contrastive_weight * L_contrastive`。`L_syn` 保持原压缩节点的融合 CE 加 0.5 倍平均分支 CE；虚拟 CE 使用相同的融合/分支权重。虚拟节点没有单一真实类别，本文实现明确采用所属压缩节点的类别分布作为软目标：融合目标统计至少一个模态可用的节点，各分支只统计该模态可用节点。query 和 MLP 在服务端优化器中更新，客户端新增时保留已有参数及优化器状态。
+
+论文未定义多模态虚拟节点、虚拟节点软标签和全局表示的具体生成方式；以上是扩展/补充定义，不能称作原论文逐式无歧义复现。对比损失按模态计算并平均，使用当前虚拟特征的均值作为全局 anchor；默认 `--multimodal_contrastive_mode paper` 忠实使用式（13）的“其他虚拟节点”分母，通过 logsumexp 稳定计算，值允许为负。可显式切换 `infonce`，将正样本项加入分母；这属于替代目标。默认温度 0.5，两个辅助损失权重均为 1.0，属于待实验验证的初始配置。未添加式（12）中没有明确给出的重构损失。
+
+三组服务端对照参数（其余模型、数据、缓存和训练预算相同）：
+
+```text
+A  --multimodal_server_mode dual_knn
+B  --multimodal_server_mode dual_virtual --multimodal_virtual_ce_weight 0 --multimodal_contrastive_weight 0
+C  --multimodal_server_mode dual_virtual --multimodal_virtual_ce_weight 1 --multimodal_contrastive_weight 1 --multimodal_contrastive_mode paper --multimodal_contrastive_temperature 0.5
+```
+
+`test/test_multimodal_virtual.py` 检查虚拟节点数和对齐、双向连接、无压缩节点跨客户端直连、query/MLP 分类梯度、动态选边、缺失模态和单客户端、软标签监督、两种对比损失的解析值、晚加入客户端、融合预测切片及通信隔离。服务器 `diagnostics` 逐轮保存损失分量、query 梯度范数、轮内拓扑变化次数和节点/边数。
 
 两路预测使用归一化预测熵计算权重：可用模态的权重正比于 `exp(-entropy / fusion_temperature)`，缺失模态权重为零。权重停止梯度，融合 logits 为两路 logits 的加权和。两路同时缺失时返回零 logits，监督损失忽略该节点。熵是可靠性的近似指标，并不保证置信度经过校准。
 
@@ -117,7 +134,7 @@ GPU 编号应按服务器当前空闲情况选择。默认 10 个客户端、100
 跨客户端子图修复的基线为 `multimodal-fedgvd` 分支提交 `3274f73`，修复分支为 `fix/multimodal-fedgvd-cross-client`。PyCharm 使用原 SSH 解释器 `/ssd-data2/hxt2024/envs/fedgvd/bin/python`，脚本为项目的 `main.py`，远程工作目录为 `/ssd-data2/hxt2024/FedGVD`。Script parameters 可填写：
 
 ```text
---fl_algorithm multimodal_fedgvd --dataset Movies --model multimodal_gcn --num_layers 2 --hid_dim 128 --gpuid 0 --train_val_test 0.6-0.2-0.2 --num_clients 10 --client_frac 1.0 --num_rounds 100 --num_epochs 3 --lr 0.01 --weight_decay 0.0005 --dropout 0.5 --seed 42 --multimodal_reduction_rate 0.2 --multimodal_server_model multimodal_gcn --multimodal_server_epochs 10 --evaluation_mode local_model_on_local_data --debug True --comm_cost True --log_root logs/multimodal_fedgvd_cross_client --log_name Movies_gcn_seed42
+--fl_algorithm multimodal_fedgvd --dataset Movies --model multimodal_gcn --num_layers 2 --hid_dim 128 --gpuid 0 --train_val_test 0.6-0.2-0.2 --num_clients 10 --client_frac 1.0 --num_rounds 100 --num_epochs 3 --lr 0.01 --weight_decay 0.0005 --dropout 0.5 --seed 42 --multimodal_reduction_rate 0.2 --multimodal_server_model multimodal_gcn --multimodal_server_epochs 10 --evaluation_mode local_model_on_local_data --debug True --comm_cost True --multimodal_server_mode dual_knn --log_root logs/multimodal_fedgvd_cross_client --log_name Movies_gcn_seed42
 ```
 
 Environment variables 沿用截图：`PYTHONUNBUFFERED=1;CUDA_DEVICE_ORDER=PCI_BUS_ID;CUDA_VISIBLE_DEVICES=6`，对应参数仍为逻辑设备 `--gpuid 0`。Toys 改为 `--dataset Toys --log_name Toys_gcn_seed42`。不同种子同时修改 `--seed` 与 `--log_name`，避免覆盖日志。正式运行前通过原 PyCharm 映射同步修复分支代码。压缩过程未变，指纹一致的原凝缩缓存可以复用；10 个客户端全参与后，每个客户端训练本地真实图加另外 9 个客户端的凝缩子图，显存需求会高于旧版。
