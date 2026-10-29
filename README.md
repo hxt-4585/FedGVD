@@ -175,7 +175,8 @@ Environment variables 沿用截图：`PYTHONUNBUFFERED=1;CUDA_DEVICE_ORDER=PCI_B
 
 ### FedGVD+ 下发错配与原型筛选实验
 
-实验分支新增论文第6–7页式(14)–(17)的机制：服务器对融合后的 logits 逐行以
+`multimodal_fedgvd` 分支默认采用完整第三种方案：随机置换＋原型筛选＋标准化KL蒸馏。
+实现论文第6–7页式(14)–(17)的机制：服务器对融合后的 logits 逐行以
 `beta=(exp(epsilon)-1)/(exp(epsilon)-1+C)` 保留，否则均匀随机置换类别位置（包括恒等置换）。
 同一轮同一来源的扰动结果广播给各客户端；服务器内部原始 logits 不变。使用独立的可复现随机流，
 不会消耗训练的全局 RNG；这不是密码学随机数实现。
@@ -184,7 +185,7 @@ Environment variables 沿用截图：`PYTHONUNBUFFERED=1;CUDA_DEVICE_ORDER=PCI_B
 因此 `multimodal_mismatch_epsilon` 仅是论文的保留率参数，不报告它为已验证的隐私预算，也不套用多轮 DP 组合公式。
 初次上传的凝缩图没有额外隐私处理；仍使用 `--dp_mech no_dp`，不能用此实验声称保护完整原始图。
 
-在原运行参数后追加：
+以下参数已是默认值，也可显式写入运行配置（旧配置中的 `none`、`mse` 等覆盖项需要移除）：
 
 ```bash
 --multimodal_logit_protection paper_mismatch --multimodal_mismatch_epsilon 1 \
@@ -202,5 +203,7 @@ Environment variables 沿用截图：`PYTHONUNBUFFERED=1;CUDA_DEVICE_ORDER=PCI_B
 `normalized_kl` 对每行 logits 按类别维度标准化（总体标准差下限1e-6），计算
 `KL(softmax(teacher/T) || softmax(student/T))` 并在接受的节点上取平均，不额外乘T平方。
 客户端蒸馏权重仍为1e-4，服务器虚拟节点分类/对比损失保持原配置。
-默认保护模式为 `none`、筛选关闭、蒸馏为 `mse`，保持原算法；仅错配对照省略筛选开关，
-无扰动KL对照使用 `--multimodal_logit_protection none --multimodal_distill_loss normalized_kl`。
+默认保护模式为 `paper_mismatch`、筛选开启、蒸馏为 `normalized_kl`。
+仅保留 `main` 与 `multimodal_fedgvd` 两个分支，历史对照实验仍保存在实验归档中。
+为复查历史实验保留显式消融参数：关闭筛选需使用 `--no_multimodal_prototype_filter`；
+无扰动KL对照再加 `--multimodal_logit_protection none`；原始MSE对照再加 `--multimodal_distill_loss mse`。

@@ -76,12 +76,14 @@ parser.add_argument("--multimodal_contrastive_mode", choices=("paper", "infonce"
 parser.add_argument("--multimodal_cross_k", type=int, default=2)
 parser.add_argument("--multimodal_similarity_threshold", type=float, default=0.0)
 parser.add_argument("--multimodal_fusion_temperature", type=float, default=0.5)
-parser.add_argument("--multimodal_logit_protection", choices=("none", "paper_mismatch"), default="none",
+parser.add_argument("--multimodal_logit_protection", choices=("none", "paper_mismatch"), default="paper_mismatch",
                     help="Paper permutation mechanism; not a certified full-vector DP release")
 parser.add_argument("--multimodal_mismatch_epsilon", type=float, default=1.0)
-parser.add_argument("--multimodal_prototype_filter", action="store_true")
+parser.add_argument("--multimodal_prototype_filter", action="store_true", default=True)
+parser.add_argument("--no_multimodal_prototype_filter", dest="multimodal_prototype_filter", action="store_false",
+                    help="Explicit ablation override; the full paper mechanism enables filtering by default")
 parser.add_argument("--multimodal_prototype_quantile", type=float, default=0.95)
-parser.add_argument("--multimodal_distill_loss", choices=("mse", "normalized_kl"), default="mse")
+parser.add_argument("--multimodal_distill_loss", choices=("mse", "normalized_kl"), default="normalized_kl")
 parser.add_argument("--multimodal_distill_temperature", type=float, default=1.0)
 
 

@@ -10,6 +10,22 @@ from openfgl.flcore.multimodal_fedgvd.paper_privacy import (
 
 
 class PaperPrivacyTests(unittest.TestCase):
+    def test_cli_defaults_select_complete_paper_mechanism(self):
+        from openfgl.config import parser
+        defaults = parser.parse_args([])
+        self.assertEqual(defaults.multimodal_logit_protection, 'paper_mismatch')
+        self.assertTrue(defaults.multimodal_prototype_filter)
+        self.assertEqual(defaults.multimodal_distill_loss, 'normalized_kl')
+        self.assertEqual(defaults.multimodal_mismatch_epsilon, 1.)
+        self.assertEqual(defaults.multimodal_prototype_quantile, .95)
+        self.assertEqual(defaults.multimodal_distill_temperature, 1.)
+        self.assertEqual(defaults.multimodal_server_mode, 'dual_virtual')
+        self.assertEqual(defaults.multimodal_virtual_ce_weight, 1.)
+        self.assertEqual(defaults.multimodal_contrastive_weight, 1.)
+        legacy = parser.parse_args(['--multimodal_logit_protection', 'none',
+            '--no_multimodal_prototype_filter', '--multimodal_distill_loss', 'mse'])
+        self.assertFalse(legacy.multimodal_prototype_filter)
+
     def test_retention_formula_and_validation(self):
         self.assertEqual(retention_probability(0, 20), 0)
         self.assertAlmostEqual(retention_probability(1, 20), (math.e-1)/(math.e-1+20))
