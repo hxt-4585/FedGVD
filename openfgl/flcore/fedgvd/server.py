@@ -1,6 +1,7 @@
 import torch
 from openfgl.flcore.base import BaseServer
-from ..fedgvd.contrastive import get_coordinated_data
+from .virtual_nodes import SubgraphIntegrators
+from .fedgvd_config import config
 from torch_geometric.data import Data
 from torch import nn
 
@@ -42,45 +43,45 @@ class FedGVDServer(BaseServer):
             data = Data(x=x, edge_index=edge_index)
 
             if "label_syn" in client_data:
-                y = torch.tensor([client_data["label_syn"]], dtype=torch.long) \
+                y = torch.tensor(client_data["label_syn"], dtype=torch.long) \
                     if not isinstance(client_data["label_syn"], torch.Tensor) \
                     else client_data["label_syn"]
-                data.y = y
+                data.y = y.long().view(-1)
 
-            datalist.append(data)
+            datalist.append(data.to(self.device))
 
-        return get_coordinated_data(
-            datalist=datalist,
-            cross_link=1,
-            dynamic_edge='none',
-            dynamic_prune=0.5,
-            cross_link_ablation=False,
-            device=self.device
-        )
+        self.integrators = SubgraphIntegrators(
+            datalist, hidden_dim=getattr(getattr(self, 'args', None), 'hid_dim', 128),
+            top_k=config['virtual_top_k'], temperature=config['virtual_temperature'])
+        with torch.no_grad():
+            return self.integrators.build_graph()
 
     def _train_global_model(self, global_data):
         self.task.model.train()
-        global_data = global_data.to(self.device)
+        self.integrators.train()
+        if not getattr(self, '_integrators_registered', False):
+            self.task.optim.add_param_group({'params': list(self.integrators.parameters())})
+            self._integrators_registered = True
 
         for _ in range(10):
             self.task.optim.zero_grad()
-
+            global_data = self.integrators.build_graph()
             embeddings, logits = self.task.model(global_data)
 
             loss = self._calculate_loss(global_data, logits)
 
             loss.backward()
             self.task.optim.step()
-
-    # def _calculate_loss(self, data, logits):
-    #     return nn.CrossEntropyLoss()(logits[:-30], data.y)
+        # Distillation uses the graph after the last parameter update.
+        with torch.no_grad():
+            self.global_data = self.integrators.build_graph()
 
     def _calculate_loss(self, data, logits):
-        num_labeled_nodes = data.y.size(0)
-        return nn.CrossEntropyLoss()(
-            logits[:num_labeled_nodes],
-            data.y
-        )
+        n = self.integrators.num_original
+        targets = self.integrators.class_targets(logits.size(1))
+        classification = nn.CrossEntropyLoss()(logits[n:], targets)
+        contrastive = self.integrators.contrastive_loss(data.x[n:])
+        return classification + contrastive
 
     def _calculate_client_logits(self, global_data):
         self.task.model.eval()
