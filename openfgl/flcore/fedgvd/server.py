@@ -22,7 +22,8 @@ class FedGVDServer(BaseServer):
 
     def _aggregate_subgraphs(self):
         datalist = []
-        for client_id in self.message_pool["sampled_clients"]:
+        self.graph_client_ids = sorted(self.message_pool["sampled_clients"])
+        for client_id in self.graph_client_ids:
             client_data = self.message_pool[f"client_{client_id}"]
 
             x = torch.tensor(client_data["feat_syn"], dtype=torch.float) \
@@ -86,13 +87,16 @@ class FedGVDServer(BaseServer):
         with torch.no_grad():
             _, all_logits = self.task.model(global_data)
 
-            client_logits = []
+            # Ownership follows the fixed graph layout, not round sampling order.
+            client_logits = {}
             ptr = 0
-            for cid in self.message_pool["sampled_clients"]:
+            for cid in self.graph_client_ids:
                 num_nodes = self.message_pool[f"client_{cid}"]["feat_syn"].shape[0]
-                client_logits.append(all_logits[ptr:ptr + num_nodes])
+                client_logits[cid] = all_logits[ptr:ptr + num_nodes]
                 ptr += num_nodes
-                
-            for cid, logits in zip(self.message_pool["sampled_clients"], client_logits):
-                self.message_pool[f"client_{cid}"]["syn_logits"] = logits.cpu()
 
+            for cid in self.graph_client_ids:
+                other_logits = [client_logits[other] for other in self.graph_client_ids
+                                if other != cid]
+                target = torch.cat(other_logits) if other_logits else all_logits[:0]
+                self.message_pool[f"client_{cid}"]["syn_logits"] = target.detach().cpu()

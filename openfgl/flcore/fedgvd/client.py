@@ -75,25 +75,25 @@ class FedGVDClient(BaseClient):
             node_offset = self.task.processed_data['data']['x'].size(0)
             self.task.processed_data['data']['x'] = torch.cat([
                 self.task.processed_data['data']['x'],
-                self.feat_syn 
+                global_feat_syn
             ])
             self.task.processed_data['data']['y'] = torch.cat([
                 self.task.processed_data['data']['y'],
-                self.label_syn  
+                global_label_syn
             ])
 
             
             self.task.processed_data['data']['edge_index'] = torch.cat([
                 self.task.processed_data['data']['edge_index'], 
                 # Shift only the merged copy; server uploads use local indices.
-                self.edge_index_syn + node_offset
+                global_edge_index_syn + node_offset
             ], dim=1)
-            self.task.processed_data['train_mask'] = torch.cat([self.task.processed_data['train_mask'], torch.ones(self.feat_syn.shape[0], dtype=torch.bool).to(self.device)], dim=0)
+            self.task.processed_data['train_mask'] = torch.cat([self.task.processed_data['train_mask'], torch.ones(global_feat_syn.shape[0], dtype=torch.bool).to(self.device)], dim=0)
             self.task.processed_data['val_mask'] = torch.cat([self.task.processed_data['val_mask'],
-                                                                torch.zeros(self.feat_syn.shape[0],
+                                                                torch.zeros(global_feat_syn.shape[0],
                                                                            dtype=torch.bool).to(self.device)], dim=0)
             self.task.processed_data['test_mask'] = torch.cat([self.task.processed_data['test_mask'],
-                                                                torch.zeros(self.feat_syn.shape[0],
+                                                                torch.zeros(global_feat_syn.shape[0],
                                                                            dtype=torch.bool).to(self.device)], dim=0)
             self.task.train_mask = self.task.processed_data['train_mask']
             self.task.val_mask = self.task.processed_data['val_mask']
@@ -151,7 +151,7 @@ class FedGVDClient(BaseClient):
             # for i in range(1,self.client_id):
             #     shift += len(self.message_pool["feat_syn"].get(i-1))
             # update_logits = embedding[shift:shift+len(self.message_pool["feat_syn"].get(self.client_id))]
-            update_logits = embedding[shift: shift + len(self.feat_syn)]
+            update_logits = embedding[shift:]
             # print(len(self.feat_syn))
             if self.message_pool["round"] == 1:
                 self.message_pool["syn_logits"].append(update_logits)
@@ -167,24 +167,18 @@ class FedGVDClient(BaseClient):
         }
 
     def cat_syn_data(self):
-        feat_syn = list(self.message_pool["feat_syn"].values())
-        global_feat_syn = torch.cat(feat_syn, dim=0)
-        label_syn = list(self.message_pool["label_syn"].values())
-        global_label_syn = torch.cat(label_syn, dim=0)
-        edge_index_syn = list(self.message_pool["edge_index_syn"].values())
-
-        node_offset = 0
-        all_edge_index_syn = []
-        for i in range(len(edge_index_syn)):
-            
-            edge_index = edge_index_syn[i]
-
-            edge_index_offset = edge_index + node_offset
-
-            all_edge_index_syn.append(edge_index_offset)
-
-            
-            node_offset += feat_syn[i].shape[0]  # 或 clients_label[i].shape[0]
-
-        global_edge_index_syn = torch.cat(all_edge_index_syn, dim=1)
-        return global_feat_syn, global_label_syn, global_edge_index_syn
+        """Merge other clients' uploads in the same order as server targets."""
+        client_ids = sorted(cid for cid in self.message_pool["feat_syn"]
+                            if cid != self.client_id)
+        if not client_ids:
+            return (self.feat_syn[:0], self.label_syn[:0],
+                    self.edge_index_syn[:, :0])
+        features, labels, edges = [], [], []
+        offset = 0
+        for cid in client_ids:
+            feat = self.message_pool["feat_syn"][cid]
+            features.append(feat)
+            labels.append(self.message_pool["label_syn"][cid])
+            edges.append(self.message_pool["edge_index_syn"][cid] + offset)
+            offset += feat.shape[0]
+        return torch.cat(features), torch.cat(labels), torch.cat(edges, dim=1)
