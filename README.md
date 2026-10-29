@@ -172,3 +172,35 @@ Environment variables 沿用截图：`PYTHONUNBUFFERED=1;CUDA_DEVICE_ORDER=PCI_B
 ```
 
 本地维护源代码，服务器运行；同步时仅传输本次修改的源码、测试和本 README，并校验文件内容，不覆盖数据集、实验结果或虚拟环境。
+
+### FedGVD+ 下发错配与原型筛选实验
+
+实验分支新增论文第6–7页式(14)–(17)的机制：服务器对融合后的 logits 逐行以
+`beta=(exp(epsilon)-1)/(exp(epsilon)-1+C)` 保留，否则均匀随机置换类别位置（包括恒等置换）。
+同一轮同一来源的扰动结果广播给各客户端；服务器内部原始 logits 不变。使用独立的可复现随机流，
+不会消耗训练的全局 RNG；这不是密码学随机数实现。
+
+**该功能是论文机制复现，不是经过证明的完整向量差分隐私机制。** 置换保留全部数值和排序后的向量，
+因此 `multimodal_mismatch_epsilon` 仅是论文的保留率参数，不报告它为已验证的隐私预算，也不套用多轮 DP 组合公式。
+初次上传的凝缩图没有额外隐私处理；仍使用 `--dp_mech no_dp`，不能用此实验声称保护完整原始图。
+
+在原运行参数后追加：
+
+```bash
+--multimodal_logit_protection paper_mismatch --multimodal_mismatch_epsilon 1 \
+--multimodal_prototype_filter --multimodal_prototype_quantile 0.95 \
+--multimodal_distill_loss normalized_kl --multimodal_distill_temperature 1
+```
+
+原型由客户端自己的真实训练节点嵌入求各类均值；多模态嵌入采用模型返回的文本/图像隐藏表示拼接。
+每次本地参与训练前以 eval 模式计算原型，阈值采用有效训练节点类内余弦距离的95%分位数。
+**分位数阈值是明确的实现选择，论文只说根据类内统计动态调整，未给出唯一公式。**
+目标类别无有效原型、嵌入为零或距离超过阈值时，拒绝该节点的蒸馏监督。
+筛选不影响本地真实节点及其他客户端凝缩节点的分类损失；全部拒绝时蒸馏项为可微的零。
+原型、筛选掩码不上传。
+
+`normalized_kl` 对每行 logits 按类别维度标准化（总体标准差下限1e-6），计算
+`KL(softmax(teacher/T) || softmax(student/T))` 并在接受的节点上取平均，不额外乘T平方。
+客户端蒸馏权重仍为1e-4，服务器虚拟节点分类/对比损失保持原配置。
+默认保护模式为 `none`、筛选关闭、蒸馏为 `mse`，保持原算法；仅错配对照省略筛选开关，
+无扰动KL对照使用 `--multimodal_logit_protection none --multimodal_distill_loss normalized_kl`。

@@ -8,6 +8,7 @@ from .contrastive import get_coordinated_data
 from .fedgvd_config import config
 from .utils import graph_from_payload, graph_to_payload
 from .virtual import VirtualGraphBuilder, integrator_contrastive_loss, virtual_classification_loss
+from .paper_privacy import retention_probability, randomized_mismatch
 
 
 class MultimodalFedGVDServer(BaseServer):
@@ -22,6 +23,17 @@ class MultimodalFedGVDServer(BaseServer):
             raise ValueError('unsupported multimodal server mode')
         self.integrator = None
         self.diagnostics = []
+        self.logit_protection = getattr(args, 'multimodal_logit_protection', 'none')
+        if self.logit_protection not in ('none', 'paper_mismatch'):
+            raise ValueError('unsupported logit protection mode')
+        self.mismatch_epsilon = getattr(args, 'multimodal_mismatch_epsilon', 1.)
+        retention_probability(self.mismatch_epsilon, 1)
+        mismatch_seed = getattr(args, 'experiment_training_seed', getattr(args, 'seed', 0))
+        self.mismatch_generator = torch.Generator(device='cpu').manual_seed(mismatch_seed + 78531)
+        self.protection_diagnostics = []
+        self._protected_source = None
+        self._protected_round = None
+        self._protected_logits = {}
         self.virtual_ce_weight = getattr(args, 'multimodal_virtual_ce_weight', 1.)
         self.contrastive_weight = getattr(args, 'multimodal_contrastive_weight', 1.)
         if any(not math.isfinite(w) or w < 0 for w in (self.virtual_ce_weight, self.contrastive_weight)):
@@ -124,4 +136,15 @@ class MultimodalFedGVDServer(BaseServer):
                 for cid, graph in self.graph_cache.items()
                 if cid != recipient and cid not in known
             }
-        self.message_pool['server'] = {'syn_logits': self.syn_logits, 'graphs': graphs}
+        logits = self.syn_logits
+        if self.logit_protection == 'paper_mismatch' and logits:
+            round_id = self.message_pool.get('round')
+            if self._protected_source is not logits or self._protected_round != round_id:
+                self._protected_logits = {}
+                for cid in sorted(logits):
+                    protected, info = randomized_mismatch(logits[cid], self.mismatch_epsilon, self.mismatch_generator)
+                    self._protected_logits[cid] = protected
+                    self.protection_diagnostics.append({'round': round_id, 'source_client': cid, **info})
+                self._protected_source, self._protected_round = logits, round_id
+            logits = self._protected_logits
+        self.message_pool['server'] = {'syn_logits': logits, 'graphs': graphs}
