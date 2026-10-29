@@ -1,0 +1,12 @@
+# Datasets and generated condensation/model artifacts stay local.
+/dataset/
+saved_*/
+
+# Local Python and IDE state.
+__pycache__/
+*.py[cod]
+.idea/
+
+# Local experiment outputs.
+/logs/
+/experiment_results/
